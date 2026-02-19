@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,8 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.maciejtyszczuk.expensetracker.data.model.CustomCategory
 import com.maciejtyszczuk.expensetracker.data.model.Expense
-import com.maciejtyszczuk.expensetracker.data.model.ExpenseCategory
 import com.maciejtyszczuk.expensetracker.ui.components.ExpenseItem
 import com.maciejtyszczuk.expensetracker.viewmodel.ExpenseViewModel
 import com.maciejtyszczuk.expensetracker.viewmodel.TimeFilter
@@ -29,6 +30,11 @@ fun MainScreen(viewModel: ExpenseViewModel) {
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     val selectedTimeFilter by viewModel.selectedTimeFilter.collectAsStateWithLifecycle()
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val expenseToEdit by viewModel.expenseToEdit.collectAsStateWithLifecycle()
+
+    var showCategoryDialog by remember { mutableStateOf(false) }
+    var expenseToSplit by remember { mutableStateOf<Expense?>(null) }
 
     Scaffold(
         floatingActionButton = {
@@ -45,13 +51,23 @@ fun MainScreen(viewModel: ExpenseViewModel) {
                 .fillMaxSize()
                 .padding(top = 16.dp)
         ) {
-            // Tytuł
-            Text(
-                text = "Moje Wydatki",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            )
+            // Tytuł z przyciskiem zarządzania kategoriami
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Moje Wydatki",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                IconButton(onClick = { showCategoryDialog = true }) {
+                    Icon(Icons.Default.Settings, contentDescription = "Zarządzaj kategoriami")
+                }
+            }
 
             // Pasek wyszukiwania
             SearchTextField(
@@ -71,8 +87,9 @@ fun MainScreen(viewModel: ExpenseViewModel) {
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Filtry kategorii
+            // Filtry kategorii (z bazy danych)
             CategoryFilterChips(
+                categories = categories,
                 selectedCategory = selectedCategory,
                 onCategorySelected = { viewModel.setSelectedCategory(it) }
             )
@@ -98,20 +115,51 @@ fun MainScreen(viewModel: ExpenseViewModel) {
             } else {
                 ExpensesList(
                     expenses = expenses,
-                    onDeleteExpense = { viewModel.deleteExpense(it) }
+                    categories = categories,
+                    onDeleteExpense = { viewModel.deleteExpense(it) },
+                    onEditExpense = { viewModel.startEditExpense(it) },
+                    onSplitExpense = { expenseToSplit = it }
                 )
             }
         }
     }
 
-    // Dialog dodawania wydatku
+    // Dialog dodawania/edycji wydatku
     if (showDialog) {
         AddExpenseDialog(
-            onDismiss = { viewModel.hideAddExpenseDialog() },
+            categories = categories,
+            expenseToEdit = expenseToEdit,
+            onDismiss = {
+                viewModel.hideAddExpenseDialog()
+                viewModel.clearEditExpense()
+            },
             onConfirm = { amount, category, description ->
                 viewModel.addExpense(amount, category, description)
                 viewModel.hideAddExpenseDialog()
+            },
+            onUpdate = { expense ->
+                viewModel.updateExpense(expense)
+                viewModel.hideAddExpenseDialog()
             }
+        )
+    }
+
+    // Dialog zarządzania kategoriami
+    if (showCategoryDialog) {
+        CategoryManagementDialog(
+            categories = categories,
+            onAddCategory = { name, emoji -> viewModel.addCategory(name, emoji) },
+            onDeleteCategory = { viewModel.deleteCategory(it) },
+            onDismiss = { showCategoryDialog = false }
+        )
+    }
+
+    // Dialog podziału wydatku
+    expenseToSplit?.let { expense ->
+        SplitExpenseDialog(
+            expense = expense,
+            viewModel = viewModel,
+            onDismiss = { expenseToSplit = null }
         )
     }
 }
@@ -165,6 +213,7 @@ fun TimeFilterChips(
 
 @Composable
 fun CategoryFilterChips(
+    categories: List<CustomCategory>,
     selectedCategory: String?,
     onCategorySelected: (String?) -> Unit
 ) {
@@ -173,18 +222,18 @@ fun CategoryFilterChips(
         contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(ExpenseCategory.values().size) { index ->
-            val category = ExpenseCategory.values()[index]
+        items(categories.size) { index ->
+            val category = categories[index]
             FilterChip(
-                selected = selectedCategory == category.displayName,
+                selected = selectedCategory == category.name,
                 onClick = {
-                    if (selectedCategory == category.displayName) {
+                    if (selectedCategory == category.name) {
                         onCategorySelected(null)
                     } else {
-                        onCategorySelected(category.displayName)
+                        onCategorySelected(category.name)
                     }
                 },
-                label = { Text("${category.emoji} ${category.displayName}") }
+                label = { Text("${category.emoji} ${category.name}") }
             )
         }
     }
@@ -229,7 +278,7 @@ fun EmptyState() {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "📝",
+                text = "\uD83D\uDCDD",
                 style = MaterialTheme.typography.displayLarge
             )
             Spacer(modifier = Modifier.height(16.dp))
@@ -250,7 +299,10 @@ fun EmptyState() {
 @Composable
 fun ExpensesList(
     expenses: List<Expense>,
-    onDeleteExpense: (Expense) -> Unit
+    categories: List<CustomCategory>,
+    onDeleteExpense: (Expense) -> Unit,
+    onEditExpense: (Expense) -> Unit,
+    onSplitExpense: (Expense) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -259,7 +311,10 @@ fun ExpensesList(
         items(expenses, key = { it.id }) { expense ->
             ExpenseItem(
                 expense = expense,
-                onDelete = { onDeleteExpense(expense) }
+                categories = categories,
+                onDelete = { onDeleteExpense(expense) },
+                onEdit = { onEditExpense(expense) },
+                onSplit = { onSplitExpense(expense) }
             )
         }
     }

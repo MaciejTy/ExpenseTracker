@@ -14,7 +14,8 @@ data class Expense(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-// Predefiniowane kategorie
+// Predefiniowane kategorie — zastąpione przez CustomCategory z bazy danych
+@Deprecated("Użyj CustomCategory z bazy danych zamiast tego enuma")
 enum class ExpenseCategory(val displayName: String, val emoji: String) {
     FOOD("Jedzenie", "🍕"),
     TRANSPORT("Transport", "🚗"),

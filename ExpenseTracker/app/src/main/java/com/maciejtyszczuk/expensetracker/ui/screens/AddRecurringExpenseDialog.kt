@@ -9,32 +9,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.maciejtyszczuk.expensetracker.data.model.CustomCategory
-import com.maciejtyszczuk.expensetracker.data.model.Expense
+import com.maciejtyszczuk.expensetracker.data.model.RecurringFrequency
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AddExpenseDialog(
+fun AddRecurringExpenseDialog(
     categories: List<CustomCategory>,
-    expenseToEdit: Expense? = null,
     onDismiss: () -> Unit,
-    onConfirm: (Double, String, String) -> Unit,
-    onUpdate: ((Expense) -> Unit)? = null
+    onConfirm: (Double, String, String, String) -> Unit
 ) {
-    val isEditMode = expenseToEdit != null
-
-    var amount by remember { mutableStateOf(expenseToEdit?.amount?.toString() ?: "") }
-    var description by remember { mutableStateOf(expenseToEdit?.description ?: "") }
-    var selectedCategory by remember {
-        mutableStateOf(
-            categories.find { it.name == expenseToEdit?.category } ?: categories.firstOrNull()
-        )
-    }
-    var expanded by remember { mutableStateOf(false) }
+    var amount by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf(categories.firstOrNull()) }
+    var selectedFrequency by remember { mutableStateOf(RecurringFrequency.MONTHLY) }
+    var categoryExpanded by remember { mutableStateOf(false) }
+    var frequencyExpanded by remember { mutableStateOf(false) }
     var amountError by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isEditMode) "Edytuj wydatek" else "Dodaj wydatek") },
+        title = { Text("Dodaj wydatek cykliczny") },
         text = {
             Column(
                 modifier = Modifier
@@ -52,41 +46,71 @@ fun AddExpenseDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     isError = amountError,
                     supportingText = {
-                        if (amountError) {
-                            Text("Podaj poprawną kwotę")
-                        }
+                        if (amountError) Text("Podaj poprawną kwotę")
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Kategoria (Dropdown)
+                // Kategoria
                 ExposedDropdownMenuBox(
-                    expanded = expanded,
-                    onExpandedChange = { expanded = it }
+                    expanded = categoryExpanded,
+                    onExpandedChange = { categoryExpanded = it }
                 ) {
                     OutlinedTextField(
-                        value = selectedCategory?.let { "${it.emoji} ${it.name}" } ?: "Wybierz kategorię",
+                        value = selectedCategory?.let { "${it.emoji} ${it.name}" } ?: "Wybierz",
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Kategoria") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable)
                     )
-
                     ExposedDropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false }
+                        expanded = categoryExpanded,
+                        onDismissRequest = { categoryExpanded = false }
                     ) {
                         categories.forEach { category ->
                             DropdownMenuItem(
                                 text = { Text("${category.emoji} ${category.name}") },
                                 onClick = {
                                     selectedCategory = category
-                                    expanded = false
+                                    categoryExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Częstotliwość
+                ExposedDropdownMenuBox(
+                    expanded = frequencyExpanded,
+                    onExpandedChange = { frequencyExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedFrequency.displayName,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Częstotliwość") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = frequencyExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                    )
+                    ExposedDropdownMenu(
+                        expanded = frequencyExpanded,
+                        onDismissRequest = { frequencyExpanded = false }
+                    ) {
+                        RecurringFrequency.values().forEach { frequency ->
+                            DropdownMenuItem(
+                                text = { Text(frequency.displayName) },
+                                onClick = {
+                                    selectedFrequency = frequency
+                                    frequencyExpanded = false
                                 }
                             )
                         }
@@ -110,23 +134,18 @@ fun AddExpenseDialog(
                 onClick = {
                     val amountDouble = amount.replace(",", ".").toDoubleOrNull()
                     if (amountDouble != null && amountDouble > 0 && selectedCategory != null) {
-                        if (isEditMode && onUpdate != null) {
-                            onUpdate(
-                                expenseToEdit!!.copy(
-                                    amount = amountDouble,
-                                    category = selectedCategory!!.name,
-                                    description = description
-                                )
-                            )
-                        } else {
-                            onConfirm(amountDouble, selectedCategory!!.name, description)
-                        }
+                        onConfirm(
+                            amountDouble,
+                            selectedCategory!!.name,
+                            description,
+                            selectedFrequency.name
+                        )
                     } else {
                         amountError = true
                     }
                 }
             ) {
-                Text(if (isEditMode) "Zapisz" else "Dodaj")
+                Text("Dodaj")
             }
         },
         dismissButton = {

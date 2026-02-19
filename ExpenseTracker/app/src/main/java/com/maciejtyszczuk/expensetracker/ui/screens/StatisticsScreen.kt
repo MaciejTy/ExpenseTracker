@@ -15,7 +15,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.maciejtyszczuk.expensetracker.data.model.ExpenseCategory
+import com.maciejtyszczuk.expensetracker.data.model.CustomCategory
 import com.maciejtyszczuk.expensetracker.viewmodel.ExpenseViewModel
 
 @Composable
@@ -24,6 +24,7 @@ fun StatisticsScreen(viewModel: ExpenseViewModel) {
     val allExpensesFlow = remember { viewModel.getAllExpensesForStats() }
     val expenses by allExpensesFlow.collectAsStateWithLifecycle(initialValue = emptyList())
     val totalExpenses by viewModel.totalExpenses.collectAsStateWithLifecycle(initialValue = 0.0)
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
 
     // Grupowanie wydatków według kategorii
     val categoryExpenses = remember(expenses) {
@@ -55,7 +56,8 @@ fun StatisticsScreen(viewModel: ExpenseViewModel) {
             item {
                 PieChartCard(
                     categoryExpenses = categoryExpenses,
-                    total = totalExpenses ?: 0.0
+                    total = totalExpenses ?: 0.0,
+                    categories = categories
                 )
             }
 
@@ -72,7 +74,8 @@ fun StatisticsScreen(viewModel: ExpenseViewModel) {
                 CategoryStatItem(
                     category = category,
                     amount = amount,
-                    percentage = (amount / (totalExpenses ?: 1.0)) * 100
+                    percentage = (amount / (totalExpenses ?: 1.0)) * 100,
+                    categories = categories
                 )
             }
         } else {
@@ -115,7 +118,8 @@ fun TotalExpenseCard(total: Double) {
 @Composable
 fun PieChartCard(
     categoryExpenses: List<Pair<String, Double>>,
-    total: Double
+    total: Double,
+    categories: List<CustomCategory> = emptyList()
 ) {
     val colors = listOf(
         Color(0xFFE57373), // Czerwony
@@ -153,7 +157,8 @@ fun PieChartCard(
             // Legenda
             ChartLegend(
                 categoryExpenses = categoryExpenses,
-                colors = colors
+                colors = colors,
+                categories = categories
             )
         }
     }
@@ -200,9 +205,10 @@ fun PieChart(
 fun CategoryStatItem(
     category: String,
     amount: Double,
-    percentage: Double
+    percentage: Double,
+    categories: List<CustomCategory> = emptyList()
 ) {
-    val expenseCategory = ExpenseCategory.fromString(category)
+    val emoji = categories.find { it.name == category }?.emoji ?: "\uD83D\uDCE6"
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -220,7 +226,7 @@ fun CategoryStatItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = expenseCategory.emoji,
+                    text = emoji,
                     style = MaterialTheme.typography.headlineSmall,
                     modifier = Modifier.padding(end = 12.dp)
                 )
@@ -250,14 +256,15 @@ fun CategoryStatItem(
 @Composable
 fun ChartLegend(
     categoryExpenses: List<Pair<String, Double>>,
-    colors: List<Color>
+    colors: List<Color>,
+    categories: List<CustomCategory> = emptyList()
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         categoryExpenses.forEachIndexed { index, (category, _) ->
-            val expenseCategory = ExpenseCategory.fromString(category)
+            val emoji = categories.find { it.name == category }?.emoji ?: "\uD83D\uDCE6"
             val color = colors[index % colors.size]
 
             Row(
@@ -280,7 +287,7 @@ fun ChartLegend(
 
                 // Emoji i nazwa kategorii
                 Text(
-                    text = "${expenseCategory.emoji} ${category}",
+                    text = "$emoji $category",
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
@@ -298,7 +305,7 @@ fun EmptyStatisticsState() {
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                text = "📊",
+                text = "\uD83D\uDCCA",
                 style = MaterialTheme.typography.displayLarge
             )
             Spacer(modifier = Modifier.height(16.dp))

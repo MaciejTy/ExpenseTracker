@@ -62,6 +62,9 @@ dependencies {
     // Icons
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
 
+    // WorkManager
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+
     // Charts (dla wykresów)
     implementation("io.github.thechance101:chart:Beta-0.0.5")
 

@@ -5,7 +5,12 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.maciejtyszczuk.expensetracker.data.database.ExpenseDatabase
 import com.maciejtyszczuk.expensetracker.data.model.Budget
+import com.maciejtyszczuk.expensetracker.data.model.CustomCategory
 import com.maciejtyszczuk.expensetracker.data.model.Expense
+import com.maciejtyszczuk.expensetracker.data.model.RecurringExpense
+import com.maciejtyszczuk.expensetracker.data.model.SplitExpense
+import com.maciejtyszczuk.expensetracker.data.model.DebtSummary
+import com.maciejtyszczuk.expensetracker.notification.NotificationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,7 +53,7 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
 
         expenses.filter { it.date >= startOfMonth }
             .sumOf { it.amount }
-    }.stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5000), 0.0)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     // Stan dialogu dodawania wydatku
     private val _showAddDialog = MutableStateFlow(false)
@@ -156,6 +161,7 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
                 date = date
             )
             dao.insertExpense(expense)
+            checkBudgetExceeded()
         }
     }
 
@@ -170,6 +176,154 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
     fun deleteAllExpenses() {
         viewModelScope.launch {
             dao.deleteAllExpenses()
+        }
+    }
+
+    // ===== Własne kategorie =====
+
+    val categories: StateFlow<List<CustomCategory>> = dao.getAllCategories()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun addCategory(name: String, emoji: String) {
+        viewModelScope.launch {
+            val category = CustomCategory(name = name, emoji = emoji)
+            dao.insertCategory(category)
+        }
+    }
+
+    fun deleteCategory(category: CustomCategory) {
+        viewModelScope.launch {
+            dao.deleteCategory(category)
+        }
+    }
+
+    // ===== Edycja wydatków =====
+
+    private val _expenseToEdit = MutableStateFlow<Expense?>(null)
+    val expenseToEdit: StateFlow<Expense?> = _expenseToEdit.asStateFlow()
+
+    fun startEditExpense(expense: Expense) {
+        _expenseToEdit.value = expense
+        _showAddDialog.value = true
+    }
+
+    fun updateExpense(expense: Expense) {
+        viewModelScope.launch {
+            dao.updateExpense(expense)
+            _expenseToEdit.value = null
+            checkBudgetExceeded()
+        }
+    }
+
+    fun clearEditExpense() {
+        _expenseToEdit.value = null
+    }
+
+    // ===== Wydatki cykliczne =====
+
+    val recurringExpenses: StateFlow<List<RecurringExpense>> = dao.getAllRecurringExpenses()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun addRecurringExpense(
+        amount: Double,
+        category: String,
+        description: String,
+        frequency: String
+    ) {
+        viewModelScope.launch {
+            val recurring = RecurringExpense(
+                amount = amount,
+                category = category,
+                description = description,
+                frequency = frequency,
+                startDate = System.currentTimeMillis()
+            )
+            dao.insertRecurringExpense(recurring)
+        }
+    }
+
+    fun updateRecurringExpense(recurringExpense: RecurringExpense) {
+        viewModelScope.launch {
+            dao.updateRecurringExpense(recurringExpense)
+        }
+    }
+
+    fun deleteRecurringExpense(recurringExpense: RecurringExpense) {
+        viewModelScope.launch {
+            dao.deleteRecurringExpense(recurringExpense)
+        }
+    }
+
+    fun toggleRecurringExpense(recurringExpense: RecurringExpense) {
+        viewModelScope.launch {
+            dao.updateRecurringExpense(
+                recurringExpense.copy(isActive = !recurringExpense.isActive)
+            )
+        }
+    }
+
+    // ===== Podział wydatków =====
+
+    val allUnpaidSplits: StateFlow<List<SplitExpense>> = dao.getAllUnpaidSplits()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSplitExpenses: StateFlow<List<SplitExpense>> = dao.getAllSplitExpenses()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun getSplitsForExpense(expenseId: Long): Flow<List<SplitExpense>> {
+        return dao.getSplitsForExpense(expenseId)
+    }
+
+    fun addSplit(expenseId: Long, personName: String, amount: Double) {
+        viewModelScope.launch {
+            val split = SplitExpense(
+                expenseId = expenseId,
+                personName = personName,
+                amount = amount
+            )
+            dao.insertSplitExpense(split)
+        }
+    }
+
+    fun markSplitAsPaid(splitExpense: SplitExpense) {
+        viewModelScope.launch {
+            dao.updateSplitExpense(splitExpense.copy(isPaid = true))
+        }
+    }
+
+    fun markSplitAsUnpaid(splitExpense: SplitExpense) {
+        viewModelScope.launch {
+            dao.updateSplitExpense(splitExpense.copy(isPaid = false))
+        }
+    }
+
+    fun deleteSplit(splitExpense: SplitExpense) {
+        viewModelScope.launch {
+            dao.deleteSplitExpense(splitExpense)
+        }
+    }
+
+    // ===== Sprawdzanie budżetu =====
+
+    private suspend fun checkBudgetExceeded() {
+        val budget = dao.getBudgetForMonthSuspend(currentMonth, currentYear) ?: return
+
+        val startOfMonth = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }.timeInMillis
+
+        val totalSpent = dao.getTotalExpensesByDateRangeSuspend(startOfMonth, System.currentTimeMillis()) ?: 0.0
+
+        if (totalSpent > budget.amount) {
+            NotificationHelper.showBudgetExceededNotification(
+                getApplication(),
+                totalSpent,
+                budget.amount
+            )
         }
     }
 }
