@@ -31,11 +31,13 @@ class BudgetCheckWorker(
 
         val endOfMonth = System.currentTimeMillis()
         val totalSpent = dao.getTotalExpensesByDateRangeSuspend(startOfMonth, endOfMonth) ?: 0.0
+        val paidBack = dao.getTotalPaidSplitsByDateRangeSuspend(startOfMonth, endOfMonth)
+        val effectiveSpent = totalSpent - paidBack
 
-        if (totalSpent > budget.amount) {
+        if (effectiveSpent > budget.amount) {
             NotificationHelper.showBudgetExceededNotification(
                 applicationContext,
-                totalSpent,
+                effectiveSpent,
                 budget.amount
             )
         }

@@ -9,7 +9,6 @@ import com.maciejtyszczuk.expensetracker.data.model.CustomCategory
 import com.maciejtyszczuk.expensetracker.data.model.Expense
 import com.maciejtyszczuk.expensetracker.data.model.RecurringExpense
 import com.maciejtyszczuk.expensetracker.data.model.SplitExpense
-import com.maciejtyszczuk.expensetracker.data.model.DebtSummary
 import com.maciejtyszczuk.expensetracker.notification.NotificationHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,8 +30,13 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
     // Funkcja dla statystyk (zawsze wszystkie wydatki)
     fun getAllExpensesForStats() = allExpensesFlow
 
-    // Suma wydatków
-    val totalExpenses = dao.getTotalExpenses()
+    // Suma wydatków (z uwzględnieniem zwrotów z dzielonych rachunków)
+    val totalExpenses = combine(
+        dao.getTotalExpenses(),
+        dao.getTotalPaidSplits()
+    ) { total, paidBack ->
+        (total ?: 0.0) - paidBack
+    }
 
     // Budżet
     private val calendar = Calendar.getInstance()
@@ -41,8 +45,11 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
 
     val currentBudget = dao.getBudgetForMonth(currentMonth, currentYear)
 
-    // Wydatki w bieżącym miesiącu
-    val monthlyExpenses: StateFlow<Double> = allExpensesFlow.map { expenses ->
+    // Wydatki w bieżącym miesiącu (z uwzględnieniem zwrotów z dzielonych rachunków)
+    val monthlyExpenses: StateFlow<Double> = combine(
+        allExpensesFlow,
+        dao.getAllSplitExpenses()
+    ) { expenses, splits ->
         val startOfMonth = Calendar.getInstance().apply {
             set(Calendar.DAY_OF_MONTH, 1)
             set(Calendar.HOUR_OF_DAY, 0)
@@ -51,8 +58,15 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
 
-        expenses.filter { it.date >= startOfMonth }
+        val monthlyExpensesList = expenses.filter { it.date >= startOfMonth }
+        val monthlyExpenseIds = monthlyExpensesList.map { it.id }.toSet()
+        val expenseTotal = monthlyExpensesList.sumOf { it.amount }
+
+        val paidBackTotal = splits
+            .filter { it.isPaid && it.expenseId in monthlyExpenseIds }
             .sumOf { it.amount }
+
+        expenseTotal - paidBackTotal
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
 
     // Stan dialogu dodawania wydatku
@@ -297,6 +311,12 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun updateSplit(splitExpense: SplitExpense, newPersonName: String, newAmount: Double) {
+        viewModelScope.launch {
+            dao.updateSplitExpense(splitExpense.copy(personName = newPersonName, amount = newAmount))
+        }
+    }
+
     fun deleteSplit(splitExpense: SplitExpense) {
         viewModelScope.launch {
             dao.deleteSplitExpense(splitExpense)
@@ -316,12 +336,15 @@ class ExpenseViewModel(application: Application) : AndroidViewModel(application)
             set(Calendar.MILLISECOND, 0)
         }.timeInMillis
 
-        val totalSpent = dao.getTotalExpensesByDateRangeSuspend(startOfMonth, System.currentTimeMillis()) ?: 0.0
+        val now = System.currentTimeMillis()
+        val totalSpent = dao.getTotalExpensesByDateRangeSuspend(startOfMonth, now) ?: 0.0
+        val paidBack = dao.getTotalPaidSplitsByDateRangeSuspend(startOfMonth, now)
+        val effectiveSpent = totalSpent - paidBack
 
-        if (totalSpent > budget.amount) {
+        if (effectiveSpent > budget.amount) {
             NotificationHelper.showBudgetExceededNotification(
                 getApplication(),
-                totalSpent,
+                effectiveSpent,
                 budget.amount
             )
         }

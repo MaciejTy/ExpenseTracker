@@ -40,6 +40,9 @@ interface ExpenseDao {
     @Query("SELECT SUM(amount) FROM expenses")
     fun getTotalExpenses(): Flow<Double?>
 
+    @Query("SELECT COALESCE(SUM(amount), 0.0) FROM split_expenses WHERE isPaid = 1")
+    fun getTotalPaidSplits(): Flow<Double>
+
     @Query("SELECT SUM(amount) FROM expenses WHERE date BETWEEN :startDate AND :endDate")
     fun getTotalExpensesByDateRange(startDate: Long, endDate: Long): Flow<Double?>
 
@@ -115,4 +118,7 @@ interface ExpenseDao {
 
     @Query("SELECT SUM(amount) FROM expenses WHERE date BETWEEN :startDate AND :endDate")
     suspend fun getTotalExpensesByDateRangeSuspend(startDate: Long, endDate: Long): Double?
+
+    @Query("SELECT COALESCE(SUM(s.amount), 0.0) FROM split_expenses s INNER JOIN expenses e ON s.expenseId = e.id WHERE s.isPaid = 1 AND e.date BETWEEN :startDate AND :endDate")
+    suspend fun getTotalPaidSplitsByDateRangeSuspend(startDate: Long, endDate: Long): Double
 }
